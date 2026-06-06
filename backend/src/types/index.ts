@@ -1,3 +1,6 @@
+// Shared types — must stay in sync with frontend/types/index.ts
+// Each topic in mockData.ts maps to one SSE endpoint.
+
 export type ServiceStatus = "running" | "stopped" | "restarting" | "exited";
 
 export interface CpuCore {
@@ -107,12 +110,4 @@ export interface SystemInfo {
   kernel: string;
   uptime: number; // seconds
   timestamp: number;
-}
-
-export interface DashboardSnapshot extends SystemInfo {
-  cpu: CpuInfo;
-  gpu: GpuInfo;
-  memory: MemoryInfo;
-  storage: StorageInfo;
-  docker: DockerInfo;
 }

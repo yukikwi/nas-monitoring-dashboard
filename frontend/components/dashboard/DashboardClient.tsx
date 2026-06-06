@@ -9,13 +9,23 @@ import { MemoryPanel } from "@/components/dashboard/MemoryPanel";
 import { StoragePanel } from "@/components/dashboard/StoragePanel";
 import { DockerPanel } from "@/components/dashboard/DockerPanel";
 import type { DashboardSnapshot } from "@/types";
+import { useRealtimeSnapshot, type LiveStatus } from "@/lib/useRealtimeSnapshot";
 
 interface DashboardClientProps {
-  snapshot: DashboardSnapshot;
+  /**
+   * Initial snapshot to render with. The `useRealtimeSnapshot` hook
+   * progressively replaces each field as the corresponding SSE stream
+   * delivers its first event, so the dashboard never shows an empty state.
+   */
+  initial: DashboardSnapshot;
 }
 
-export function DashboardClient({ snapshot }: DashboardClientProps) {
-  const memoryPercent = (snapshot.memory.ramUsed / snapshot.memory.ramTotal) * 100;
+export function DashboardClient({ initial }: DashboardClientProps) {
+  const { snapshot, status } = useRealtimeSnapshot(initial);
+  const memoryPercent =
+    snapshot.memory.ramTotal > 0
+      ? (snapshot.memory.ramUsed / snapshot.memory.ramTotal) * 100
+      : 0;
 
   return (
     <>
@@ -32,6 +42,7 @@ export function DashboardClient({ snapshot }: DashboardClientProps) {
             cpu={snapshot.cpu.overall}
             memory={memoryPercent}
             storage={snapshot.storage.overall}
+            liveStatus={status}
           />
         </div>
 
@@ -81,7 +92,7 @@ export function DashboardClient({ snapshot }: DashboardClientProps) {
         </motion.div>
 
         <footer className="mt-6 text-center text-[10px] uppercase tracking-[0.2em] text-white/30">
-          Liquid glass · mock data · {new Date(snapshot.timestamp).getFullYear()}
+          Liquid glass · live data · {new Date(snapshot.timestamp).getFullYear()}
         </footer>
       </div>
     </>

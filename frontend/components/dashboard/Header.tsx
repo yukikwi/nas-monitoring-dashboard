@@ -8,9 +8,11 @@ import {
   HardDrive,
   Activity,
   Server,
+  Radio,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { formatUptime } from "@/lib/format";
+import type { LiveStatus } from "@/lib/useRealtimeSnapshot";
 
 interface HeaderProps {
   hostname: string;
@@ -22,6 +24,7 @@ interface HeaderProps {
   cpu: number;
   memory: number;
   storage: number;
+  liveStatus: LiveStatus;
 }
 
 export function Header({
@@ -34,6 +37,7 @@ export function Header({
   cpu,
   memory,
   storage,
+  liveStatus,
 }: HeaderProps) {
   // Start with a stable placeholder so server and first client render
   // match exactly. The real time is filled in by the effect on mount.
@@ -75,6 +79,7 @@ export function Header({
         </div>
 
         <div className="flex flex-1 flex-wrap items-center justify-end gap-3">
+          <LivePill status={liveStatus} />
           <Pill icon={<Activity className="h-3.5 w-3.5" />} label="Uptime">
             {formatUptime(uptime)}
           </Pill>
@@ -111,6 +116,49 @@ export function Header({
   );
 }
 
+function LivePill({ status }: { status: LiveStatus }) {
+  const config = {
+    live: {
+      label: "Live",
+      dot: "bg-emerald-400",
+      ping: "bg-emerald-400/60",
+      tone: "from-emerald-400/20 to-cyan-400/20 text-emerald-200 ring-emerald-400/30",
+    },
+    connecting: {
+      label: "Connecting…",
+      dot: "bg-amber-400",
+      ping: "bg-amber-400/60",
+      tone: "from-amber-400/20 to-orange-400/20 text-amber-200 ring-amber-400/30",
+    },
+    degraded: {
+      label: "Degraded",
+      dot: "bg-amber-400",
+      ping: "bg-amber-400/60",
+      tone: "from-amber-400/20 to-orange-400/20 text-amber-200 ring-amber-400/30",
+    },
+    offline: {
+      label: "Offline",
+      dot: "bg-rose-400",
+      ping: "bg-rose-400/60",
+      tone: "from-rose-400/20 to-red-500/20 text-rose-200 ring-rose-400/30",
+    },
+  }[status];
+
+  return (
+    <Pill icon={<Radio className="h-3.5 w-3.5" />} label="Status">
+      <span className="relative inline-flex h-2 w-2">
+        <span
+          className={`absolute inset-0 rounded-full ${config.dot} ${status === "live" ? "animate-ping" : ""}`}
+        />
+        <span className={`relative inline-flex h-2 w-2 rounded-full ${config.dot}`} />
+      </span>
+      <span className={status === "connecting" ? "text-white" : ""}>
+        {config.label}
+      </span>
+    </Pill>
+  );
+}
+
 function Pill({
   icon,
   label,
@@ -138,7 +186,7 @@ function Pill({
       {icon ? <span className="text-white/70">{icon}</span> : null}
       <span className="text-white/60">{label}</span>
       <span
-        className={`${mono ? "font-mono tabular-nums" : "font-medium tabular-nums"} text-white`}
+        className={`${mono ? "font-mono tabular-nums" : "font-medium tabular-nums"} flex items-center gap-1.5 text-white`}
       >
         {children}
       </span>
