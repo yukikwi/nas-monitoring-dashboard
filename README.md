@@ -1,4 +1,4 @@
-# nas-monitoring-dashboard
+# nas-monitoring-dashboard (Use with caution, All codes in this project write by minimax m3 model)
 
 A realtime monitoring dashboard for a self-hosted NAS. The Next.js 16
 frontend subscribes to a Bun/Elysia backend that streams the host's real
