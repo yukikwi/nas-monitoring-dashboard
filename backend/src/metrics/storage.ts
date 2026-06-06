@@ -1,6 +1,82 @@
 import type { DiskInfo, StorageInfo } from "../types";
 import { isLinux, isMac, readFile, run, tryRun } from "./platform";
 
+// Filesystems that aren't backed by a local physical disk. Compared
+// case-insensitively against the Filesystem column from `df -k`.
+const VIRTUAL_FS = new Set([
+  // Linux virtual (no physical backing)
+  "tmpfs",
+  "devtmpfs",
+  "devfs",
+  "proc",
+  "sysfs",
+  "cgroup",
+  "cgroup2",
+  "overlay",
+  "aufs",
+  "squashfs",
+  "ramfs",
+  "autofs",
+  "fusectl",
+  "configfs",
+  "debugfs",
+  "tracefs",
+  "mqueue",
+  "pstore",
+  "bpf",
+  "binfmt_misc",
+  "securityfs",
+  "efivarfs",
+  "hugetlbfs",
+  "rpc_pipefs",
+  "nfsd",
+  "nsfs",
+  "fuse.gvfsd-fuse",
+  "none", // systemd credentials, bind mounts, overlay internals
+  // Network filesystems
+  "nfs",
+  "nfs4",
+  "cifs",
+  "smbfs",
+  "ceph",
+  "glusterfs",
+  "sshfs",
+  "fuse.sshfs",
+  "fuse.snapfuse",
+  "9p",
+  "afs",
+  "webdav",
+  "afpfs",
+  "virtiofs",
+]);
+
+// Mount-point prefixes that are never physical disks.
+const VIRTUAL_MOUNT_PREFIXES = [
+  "/System/Volumes/", // macOS APFS system volumes
+  "/private/var/folders",
+  "/snap/", // snap package mounts
+  "/sys/",
+  "/proc/",
+  "/run/",
+];
+
+// Device path prefixes that are never physical disks. (The Filesystem
+// column from `df` doubles as the device name in the rest of this file,
+// so checking `d.device` here catches loopback / ramdisk mounts whose
+// underlying filesystem name would otherwise look "real" — e.g. a
+// squashfs snap looks like `squashfs`, but a loop-mounted ext4 image
+// looks like `ext4`.)
+const VIRTUAL_DEVICE_PREFIXES = [
+  "/dev/loop",
+  "/dev/ram",
+];
+
+// Network mounts are reported by `df` as paths (`server:/path` for NFS,
+// `//server/share` for CIFS), not as the filesystem type, so the
+// VIRTUAL_FS name check misses them. Match the path shapes instead.
+const NETWORK_FS_PATTERN = /^[a-z0-9._-]+:\//; // NFS: `server:/path`
+const isCifsFs = (filesystem: string) => filesystem.startsWith("//"); // CIFS/SMB
+
 // ---------------------------------------------------------------------------
 // Disk I/O tracking — needs a delta between two samples.
 // We keep the previous sample here and compute MB/s on each collect() call.
@@ -184,11 +260,14 @@ export async function collectStorage(): Promise<StorageInfo> {
   const ioDelta = computeDelta(currentIo);
   const temperature = (await readTemperature()) ?? 0;
 
-  // Filter to "real" mounts only.
+  // Filter to physical disks only — drop virtual filesystems, network
+  // mounts, and loopback/ramdisk device paths.
   const mounts = df.filter((d) => {
-    if (d.filesystem.startsWith("devfs") || d.filesystem.startsWith("tmpfs")) return false;
-    if (d.mount.startsWith("/System/Volumes/")) return false;
-    if (d.mount.startsWith("/dev/") || d.mount.startsWith("/private/var/folders")) return false;
+    if (VIRTUAL_FS.has(d.filesystem.toLowerCase())) return false;
+    if (NETWORK_FS_PATTERN.test(d.filesystem)) return false;
+    if (isCifsFs(d.filesystem)) return false;
+    if (VIRTUAL_MOUNT_PREFIXES.some((p) => d.mount.startsWith(p))) return false;
+    if (VIRTUAL_DEVICE_PREFIXES.some((p) => d.device.startsWith(p))) return false;
     return d.totalKb > 0;
   });
 
