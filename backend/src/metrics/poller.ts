@@ -12,12 +12,19 @@ import { collectStorage } from "./storage";
 import { collectSystem } from "./system";
 
 const POLL_INTERVALS = {
-  system: 2_000,
-  cpu: 2_000,
-  gpu: 3_000,
-  memory: 3_000,
-  storage: 4_000,
-  docker: 5_000,
+  // All run at 1s so the SSE 1Hz tick always has a fresh cached value.
+  // The collectors themselves are cheap subprocesses (sysctl, df, vm_stat,
+  // top, nvidia-smi) and can comfortably sustain this rate.
+  system: 1_000,
+  cpu: 1_000,
+  gpu: 1_000,
+  memory: 1_000,
+  storage: 1_000,
+  // `docker stats` is the only expensive call — it spawns a process and
+  // walks every container. 2s keeps the cache fresh without hammering the
+  // daemon. The SSE still yields at 1s; clients just see the same
+  // container stats for two consecutive ticks.
+  docker: 2_000,
 } as const;
 
 // `null` until the first sample lands. The routes will surface a 503-like
