@@ -69,7 +69,10 @@ export function DockerPanel({ docker }: DockerPanelProps) {
         }
       />
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div
+        suppressHydrationWarning
+        className="mb-3 flex flex-wrap items-center gap-2"
+      >
         <div className="flex items-center gap-1 rounded-xl bg-white/[0.04] p-0.5 ring-1 ring-white/5">
           {(
             [
