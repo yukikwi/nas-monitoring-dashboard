@@ -105,9 +105,13 @@ named event; consumers can use any SSE client (curl, `EventSource`,
 | `/api/stream/docker`    | `docker`   | `DockerInfo`  — running/stopped/total, containers[], services[] |
 
 Per-topic tick rates (background poller → SSE send):
-`system` 2 s · `cpu` 1 s · `gpu` 1.5 s · `memory` 2 s · `storage` 4 s ·
-`docker` 3 s. CORS is permissive in dev; the backend echoes the request
-origin so the Next.js dev server (`:3000`) is allowed by default.
+all topics yield at **1 s** (a steady 1 Hz heartbeat for the dashboard).
+The collectors underneath run at the same rate; `docker` is the only
+exception — it polls every 2 s because `docker stats` is the most
+expensive call, and the SSE still yields at 1 s (clients see the same
+container stats for two consecutive ticks). CORS is permissive in dev;
+the backend echoes the request origin so the Next.js dev server
+(`:3000`) is allowed by default.
 
 Quick sanity check:
 
