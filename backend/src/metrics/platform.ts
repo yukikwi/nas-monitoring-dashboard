@@ -5,18 +5,29 @@
 export const isMac = process.platform === "darwin";
 export const isLinux = process.platform === "linux";
 
-/** Run a command, capture stdout, and return it as a string. Throws on non-zero exit. */
+/**
+ * Run a command, capture stdout, and return it as a string. Throws on
+ * non-zero exit or timeout.
+ *
+ * Uses `Bun.spawn` (not Bun's `$` shell) because we need to pass arbitrary
+ * argv — including paths that contain spaces, like the mounted DMG
+ * `/Volumes/MiniMax Code 3.0.37-arm64`. `$` would need `sh -c` quoting to
+ * preserve those spaces, and even then the interpolation escaping makes
+ * the call site fragile.
+ */
 export async function run(
   cmd: string[],
   options: { timeoutMs?: number } = {},
 ): Promise<string> {
+  const timeoutMs = options.timeoutMs ?? 5_000;
   const proc = Bun.spawn(cmd, {
     stdout: "pipe",
     stderr: "pipe",
     env: { ...process.env, LANG: "C" },
   });
 
-  const timeoutMs = options.timeoutMs ?? 5_000;
+  // No built-in subprocess timeout in `Bun.spawn`; race a timer that kills
+  // the process if it overruns. The OS reaps the killed process on exit.
   const timer = setTimeout(() => proc.kill(), timeoutMs);
   try {
     const [stdout, stderr, exitCode] = await Promise.all([
@@ -36,9 +47,8 @@ export async function run(
 }
 
 /**
- * Same as run(), but returns `null` on failure (e.g., tool not installed,
- * permission denied). Used for optional collectors like `nvidia-smi` and
- * `docker`.
+ * Same as run(), but returns `null` on failure. Used for optional
+ * collectors like `nvidia-smi` and `docker`.
  */
 export async function tryRun(
   cmd: string[],
@@ -65,16 +75,14 @@ export async function readFile(path: string): Promise<string | null> {
   }
 }
 
-/** Read a single value from sysctl as a string. */
+/** Read a single value from sysctl as a string. Synchronous via Bun.spawnSync. */
 export function sysctlString(name: string): string | null {
-  try {
-    const out = require("node:child_process")
-      .execFileSync("sysctl", ["-n", name], { encoding: "utf8" })
-      .trim();
-    return out || null;
-  } catch {
-    return null;
-  }
+  const proc = Bun.spawnSync(["sysctl", "-n", name], {
+    env: { ...process.env, LANG: "C" },
+  });
+  if (proc.exitCode !== 0) return null;
+  const out = proc.stdout.toString().trim();
+  return out || null;
 }
 
 /** Read a single number from sysctl. */

@@ -29,9 +29,11 @@ export function BarMeter({
     >
       <motion.div
         className={`h-full rounded-full bg-gradient-to-r ${gradient}`}
-        initial={{ width: 0 }}
+        // See RingMeter — `initial={false}` stops the bar from resetting to
+        // 0% on every SSE update. The bar still animates between values.
+        initial={false}
         animate={{ width: `${clamped}%` }}
-        transition={{ duration: 1.0, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
         style={{
           boxShadow: "0 0 12px rgba(96,165,250,0.35)",
         }}

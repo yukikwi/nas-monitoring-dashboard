@@ -111,17 +111,22 @@ async function readDf(): Promise<
   const out = await tryRun(["df", "-k"]);
   if (!out) return [];
   const lines = out.split("\n").slice(1); // skip header
+  // The number of leading columns before the mount point depends on platform:
+  //   macOS df -k:  Filesystem 1024-blocks Used Available Capacity iused ifree %iused Mounted on   (8 cols)
+  //   Linux  df:    Filesystem 1024-blocks Used Available Use%              Mounted on             (5 cols)
+  // Mount paths can contain spaces (e.g. `/Volumes/MiniMax Code 3.0.37-arm64`),
+  // so we must take everything from `MOUNT_START_COL` onwards and re-join with
+  // spaces — taking only `parts[parts.length - 1]` would chop the path at the
+  // first space and pass a meaningless suffix to `diskutil`.
+  const MOUNT_START_COL = isMac ? 8 : 5;
   return lines
     .map((line) => {
       const parts = line.trim().split(/\s+/);
-      // macOS: Filesystem 1024-blocks Used Available Capacity iused ifree %iused Mounted-on
-      // Linux: Filesystem 1024-blocks Used Available Use% Mounted-on
-      // In all cases, the LAST column is the mount point.
-      if (parts.length < 6) return null;
+      if (parts.length <= MOUNT_START_COL) return null;
       const filesystem = parts[0]!;
-      const mount = parts[parts.length - 1]!;
       const total = Number(parts[1]) || 0;
       const used = Number(parts[2]) || 0;
+      const mount = parts.slice(MOUNT_START_COL).join(" ");
       return {
         filesystem,
         mount,

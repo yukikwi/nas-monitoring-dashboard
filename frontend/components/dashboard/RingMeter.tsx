@@ -86,9 +86,14 @@ export function RingMeter({
           strokeLinecap="round"
           fill="transparent"
           strokeDasharray={circumference}
-          initial={{ strokeDashoffset: circumference }}
+          // `initial={false}` skips the "from zero" entry animation. Without
+          // it, Framer Motion re-applies the `initial` value on every render,
+          // so the ring would reset to 0% each time `value` changes and spend
+          // the full transition duration re-animating. With a 1Hz SSE feed
+          // and a 1.2s transition, the ring would always look near-empty.
+          initial={false}
           animate={{ strokeDashoffset: offset }}
-          transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
           style={{ filter: "drop-shadow(0 0 6px rgba(96,165,250,0.35))" }}
         />
       </svg>

@@ -1,22 +1,22 @@
-import type { DockerContainer, DockerInfo, DockerService, ServiceStatus } from "../types";
+import type { DockerContainer, DockerInfo, ServiceStatus } from "../types";
 import { tryRun } from "./platform";
 
 // ---------------------------------------------------------------------------
-// Docker: parsed from `docker ps -a --format json` and
-// `docker service ls --format json`. If the daemon isn't running or docker
-// isn't installed, returns an empty payload — the dashboard renders "no
-// containers" rather than crashing.
+// Docker — non-swarm focus for now.
+//
+// Sources:
+//   `docker ps -a --format json`     — list all containers (works without swarm)
+//   `docker stats --no-stream ...`   — per-container CPU/mem enrichment
+//
+// Swarm-mode services (`docker service ls`) are intentionally not queried —
+// they require `docker swarm init` and would spam the log with
+// "This node is not a swarm manager" on every poll. The `services` field
+// stays in the payload (always empty for now) so the frontend type doesn't
+// need to change when swarm support is added later.
+//
+// If the daemon isn't running or docker isn't installed, returns an empty
+// payload — the dashboard renders "no containers" rather than crashing.
 // ---------------------------------------------------------------------------
-
-const CONTAINER_FIELDS = [
-  "ID",
-  "Names",
-  "Image",
-  "State",
-  "Status",
-  "Ports",
-  "Labels",
-] as const;
 
 interface DockerPsLine {
   ID?: string;
@@ -90,9 +90,7 @@ function parseContainers(json: string): DockerContainer[] {
     image: c.Image ?? "",
     status: statusFromState(c.State ?? ""),
     uptime: parseStatusToUptime(c.Status ?? ""),
-    // Real per-container CPU/mem requires `docker stats`, which is expensive
-    // to parse on every tick. We expose the values when docker stats is
-    // available (see collectDocker below).
+    // Real per-container CPU/mem comes from `docker stats` below.
     cpu: 0,
     memory: 0,
     memoryMb: 0,
@@ -101,34 +99,8 @@ function parseContainers(json: string): DockerContainer[] {
   }));
 }
 
-function parseServices(json: string): DockerService[] {
-  const lines = json.split("\n").filter((l) => l.trim());
-  const items: { Name?: string; Replicas?: string; Image?: string }[] = [];
-  for (const line of lines) {
-    try {
-      items.push(JSON.parse(line));
-    } catch {
-      const inner = line.replace(/^\[|\]$/g, "").replace(/}\s*,\s*{/g, "}\n{");
-      for (const chunk of inner.split("\n")) {
-        try {
-          items.push(JSON.parse(chunk));
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-  }
-  return items.map((s) => ({
-    name: s.Name ?? "",
-    replicas: s.Replicas ?? "0/0",
-    image: s.Image ?? "",
-    status: (s.Replicas ?? "").startsWith("0/") ? "stopped" : "running",
-    uptime: 0, // docker service ls doesn't expose uptime directly
-  }));
-}
-
-// Optional: enrich with `docker stats --no-stream --format json`.
-// Skipped if it fails or returns no data — the dashboard tolerates zeros.
+// Enrich with `docker stats --no-stream --format json`. Skipped if it fails
+// or returns no data — the dashboard tolerates zeros.
 async function enrichWithStats(containers: DockerContainer[]): Promise<DockerContainer[]> {
   const out = await tryRun(["docker", "stats", "--no-stream", "--format", "json"], {
     timeoutMs: 5_000,
@@ -191,8 +163,6 @@ export async function collectDocker(): Promise<DockerInfo> {
   }
 
   const containers = await enrichWithStats(parseContainers(psOut));
-  const servicesOut = await tryRun(["docker", "service", "ls", "--format", "json"]);
-  const services = servicesOut ? parseServices(servicesOut) : [];
 
   const running = containers.filter((c) => c.status === "running").length;
   const stopped = containers.filter(
@@ -204,6 +174,8 @@ export async function collectDocker(): Promise<DockerInfo> {
     stopped,
     total: containers.length,
     containers,
-    services,
+    // Non-swarm mode: no services to report. Kept in the payload so the
+    // frontend type stays stable when swarm support is added.
+    services: [],
   };
 }

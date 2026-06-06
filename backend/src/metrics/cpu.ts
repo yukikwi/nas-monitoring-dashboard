@@ -184,7 +184,13 @@ async function readTemperature(): Promise<number | null> {
 // Public API
 // ---------------------------------------------------------------------------
 
-let cached: CpuInfo | null = null;
+/**
+ * Last successfully-sampled `CpuInfo`. When the current sample is bad
+ * (subprocess killed, malformed output, `top` preempted under heavy load)
+ * we return this instead of poisoning the cache with a `0%` payload that
+ * would make the UI flash to zero for several ticks.
+ */
+let lastGood: CpuInfo | null = null;
 
 export async function collectCpu(): Promise<CpuInfo> {
   const id = await loadIdentity();
@@ -236,7 +242,14 @@ export async function collectCpu(): Promise<CpuInfo> {
     temperature: temperature ?? 0,
   }));
 
-  cached = {
+  // If this tick produced no usable data, serve the last good snapshot so the
+  // dashboard doesn't flash to 0% for several ticks when `top` is preempted
+  // (e.g. under heavy load, or when the subprocess is killed by our timeout).
+  if (overallUsage === 0 && !sample && lastGood) {
+    return lastGood;
+  }
+
+  const next: CpuInfo = {
     brand: id.brand,
     model: id.model,
     architecture: id.architecture,
@@ -254,5 +267,10 @@ export async function collectCpu(): Promise<CpuInfo> {
     lastSampleAt = Date.now();
   }
 
-  return cached;
+  // Only overwrite `lastGood` with a non-degenerate reading. A 0% sample
+  // mid-flight is almost always a sign of a failed `top` invocation, not
+  // a genuinely idle machine.
+  if (overallUsage > 0) lastGood = next;
+
+  return next;
 }
