@@ -10,6 +10,7 @@ import { StoragePanel } from "@/components/dashboard/StoragePanel";
 import { DockerPanel } from "@/components/dashboard/DockerPanel";
 import type { DashboardSnapshot } from "@/types";
 import { useRealtimeSnapshot, type LiveStatus } from "@/lib/useRealtimeSnapshot";
+import { hasGpuData } from "@/lib/gpu";
 
 interface DashboardClientProps {
   /**
@@ -22,6 +23,7 @@ interface DashboardClientProps {
 
 export function DashboardClient({ initial }: DashboardClientProps) {
   const { snapshot, status } = useRealtimeSnapshot(initial);
+  const showGpu = hasGpuData(snapshot.gpu);
   const memoryPercent =
     snapshot.memory.ramTotal > 0
       ? (snapshot.memory.ramUsed / snapshot.memory.ramTotal) * 100
@@ -57,17 +59,19 @@ export function DashboardClient({ initial }: DashboardClientProps) {
         >
           <motion.div
             variants={panelVariants}
-            className="lg:col-span-7"
+            className={showGpu ? "lg:col-span-7" : "lg:col-span-12"}
           >
             <CpuPanel cpu={snapshot.cpu} />
           </motion.div>
 
-          <motion.div
-            variants={panelVariants}
-            className="lg:col-span-5"
-          >
-            <GpuPanel gpu={snapshot.gpu} />
-          </motion.div>
+          {showGpu ? (
+            <motion.div
+              variants={panelVariants}
+              className="lg:col-span-5"
+            >
+              <GpuPanel gpu={snapshot.gpu} />
+            </motion.div>
+          ) : null}
 
           <motion.div
             variants={panelVariants}
