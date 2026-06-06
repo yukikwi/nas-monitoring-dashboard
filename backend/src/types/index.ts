@@ -7,7 +7,9 @@ export interface CpuCore {
   id: number;
   usage: number; // 0-100
   frequency: number; // GHz
-  temperature: number; // °C
+  // `null` when the host doesn't expose a per-core reading (e.g. macOS —
+  // SMC temps require `sudo powermetrics` or a third-party tool).
+  temperature: number | null; // °C
 }
 
 export interface CpuInfo {
@@ -19,8 +21,10 @@ export interface CpuInfo {
   baseFrequency: number; // GHz
   overall: number; // 0-100
   cores: CpuCore[];
-  temperature: number; // °C
-  power: number; // watts
+  // `null` when the host doesn't expose this reading. `0` would be
+  // misleading — a 0W reading looks like an idle CPU, not "no data".
+  temperature: number | null; // °C
+  power: number | null; // watts
 }
 
 export interface GpuProcess {

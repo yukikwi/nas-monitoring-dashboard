@@ -234,12 +234,12 @@ export async function collectCpu(): Promise<CpuInfo> {
     perCoreUsage = new Array(id.physicalCores).fill(overallUsage);
   }
 
-  // Build the per-core array.
+  // Build the per-core array. `temperature` may be `null` (see below).
   const cores: CpuCore[] = perCoreUsage.map((usage, i) => ({
     id: i,
     usage,
     frequency: freqs[i] ?? id.baseFrequency,
-    temperature: temperature ?? 0,
+    temperature,
   }));
 
   // If this tick produced no usable data, serve the last good snapshot so the
@@ -249,6 +249,15 @@ export async function collectCpu(): Promise<CpuInfo> {
     return lastGood;
   }
 
+  // Temperature: Linux exposes it via /sys/class/thermal or /sys/class/hwmon.
+  // macOS would need `sudo powermetrics` (privileged, heavy) or a third-party
+  // SMC reader — neither is a reasonable default. We propagate `null` so the
+  // UI can show "—" instead of a misleading 0°C.
+  //
+  // Power: no cross-platform non-privileged source exists. RAPL on Linux
+  // would work, but it's out of scope for now. The nvidia-smi path already
+  // covers GPU power; CPU power is `null` until a platform-specific reader
+  // is wired in.
   const next: CpuInfo = {
     brand: id.brand,
     model: id.model,
@@ -258,8 +267,8 @@ export async function collectCpu(): Promise<CpuInfo> {
     baseFrequency: id.baseFrequency,
     overall: overallUsage,
     cores,
-    temperature: temperature ?? 0,
-    power: 0, // Not exposed cross-platform without privileged tools.
+    temperature,
+    power: null,
   };
 
   if (sample) {

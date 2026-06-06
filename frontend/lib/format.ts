@@ -33,11 +33,13 @@ export function formatPercent(value: number, decimals = 0): string {
   return `${value.toFixed(decimals)}%`;
 }
 
-export function formatTemp(celsius: number): string {
+export function formatTemp(celsius: number | null): string {
+  if (celsius === null) return "—";
   return `${celsius.toFixed(0)}°C`;
 }
 
-export function formatPower(watts: number): string {
+export function formatPower(watts: number | null): string {
+  if (watts === null) return "—";
   return `${watts.toFixed(0)} W`;
 }
 

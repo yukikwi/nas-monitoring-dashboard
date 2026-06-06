@@ -47,7 +47,15 @@ export function CpuPanel({ cpu }: CpuPanelProps) {
               icon={<Thermometer className="h-3.5 w-3.5" />}
               label="Temp"
               value={formatTemp(cpu.temperature)}
-              tone={cpu.temperature > 80 ? "hot" : cpu.temperature > 65 ? "warm" : "cool"}
+              tone={
+                cpu.temperature === null
+                  ? "cool"
+                  : cpu.temperature > 80
+                    ? "hot"
+                    : cpu.temperature > 65
+                      ? "warm"
+                      : "cool"
+              }
             />
             <StatChip
               icon={<Zap className="h-3.5 w-3.5" />}
@@ -89,7 +97,7 @@ export function CpuPanel({ cpu }: CpuPanelProps) {
                 <BarMeter value={core.usage} height={5} showShimmer={false} />
                 <div className="mt-1 flex items-center justify-between text-[9px] text-white/40 tabular-nums">
                   <span>{core.frequency.toFixed(1)} GHz</span>
-                  <span>{core.temperature}°</span>
+                  <span>{core.temperature === null ? "—" : `${core.temperature}°`}</span>
                 </div>
               </motion.div>
             ))}
