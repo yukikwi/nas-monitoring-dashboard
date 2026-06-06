@@ -165,20 +165,110 @@ async function readFrequency(): Promise<number[]> {
 
 async function readTemperature(): Promise<number | null> {
   if (isLinux) {
-    // Try the most common thermal zone first.
-    for (const path of [
-      "/sys/class/thermal/thermal_zone0/temp",
-      "/sys/class/hwmon/hwmon0/temp1_input",
-    ]) {
-      const raw = await readFile(path);
-      if (raw) {
-        const milli = Number(raw.trim());
-        if (Number.isFinite(milli)) return Math.round(milli / 1000);
+    // Walk the JSON output of `sensors -j` looking for the first adapter that
+    // has a CPU-die temperature. We prefer k10temp (AMD) and coretemp
+    // (Intel), in that order. Plain `temp1_input` on an arbitrary hwmon
+    // would happily pick up an NVMe drive's composite sensor and report a
+    // constant ~50°C — that's the bug this rewrites around.
+    const json = await tryRun(["sensors", "-j"], { timeoutMs: 2_000 });
+    if (json) {
+      let parsed: unknown;
+      try { parsed = JSON.parse(json); } catch { parsed = null; }
+      if (parsed && typeof parsed === "object") {
+        const adapters = parsed as Record<string, Record<string, Record<string, number>>>;
+        const preference = ["k10temp", "coretemp", "zenpower"];
+        for (const needle of preference) {
+          for (const [name, features] of Object.entries(adapters)) {
+            if (!name.toLowerCase().includes(needle)) continue;
+            // k10temp labels its Tctl at temp1_input and Tdie at temp3_input.
+            // coretemp's first physical package is "Package id 0" at temp1_input.
+            const label = features["Tctl"] ?? features["Tdie"] ?? features["Package id 0"] ?? features["CPU"];
+            const raw = label?.["temp1_input"];
+            if (Number.isFinite(raw)) return Math.round(raw as number);
+          }
+        }
       }
+    }
+
+    // Fallback: thermal_zone0 (some distros expose it without lm-sensors).
+    const tz = await readFile("/sys/class/thermal/thermal_zone0/temp");
+    if (tz) {
+      const milli = Number(tz.trim());
+      if (Number.isFinite(milli)) return Math.round(milli / 1000);
     }
   }
   return null;
 }
+
+// Rough TDP lookup, in watts, keyed on substrings of the `model name` string.
+// Linux sysfs doesn't expose CPU TDP, and RAPL needs root. The estimate is
+// intentionally conservative — better to under-report than to advertise a
+// number that ignores boost/PBO behavior.
+const TDP_HINTS: Array<[RegExp, number]> = [
+  // AMD EPYC server
+  [/epyc\s*9[6-9]\d{2}/i, 360],
+  [/epyc\s*7[7-9]\d{2}/i, 240],
+  [/epyc\s*7[0-6]\d{2}/i, 180],
+  [/epyc\s*4\d{2}/i, 120],
+  [/epyc\s*3\d{2}/i, 155],
+  [/epyc/i, 120],
+  // AMD Ryzen desktop — newer 3D V-Cache parts run hotter
+  [/ryzen\s*9.*x3d/i, 120],
+  [/ryzen\s*7.*x3d/i, 120],
+  [/ryzen\s*9\s*79\d{2}/i, 170],
+  [/ryzen\s*9\s*7\d{3}/i, 120],
+  [/ryzen\s*7\s*7\d{3}/i, 105],
+  [/ryzen\s*7/i, 65],
+  [/ryzen\s*5\s*7\d{3}/i, 105],
+  [/ryzen\s*5/i, 65],
+  [/ryzen\s*3/i, 65],
+  // Intel Xeon / Core
+  [/xeon.*platinum/i, 205],
+  [/xeon.*gold/i, 165],
+  [/xeon.*silver/i, 85],
+  [/xeon/i, 120],
+  [/core\s*i9-14\d{3}/i, 125],
+  [/core\s*i9/i, 65],
+  [/core\s*i7/i, 65],
+  [/core\s*i5/i, 65],
+];
+
+function estimateTdp(model: string): number {
+  for (const [re, w] of TDP_HINTS) {
+    if (re.test(model)) return w;
+  }
+  return 65;
+}
+
+async function readPower(overallUsage: number, model: string): Promise<number | null> {
+  // RAPL (`/sys/class/powercap/intel-rapl/.../energy_uj`) is the only
+  // non-estimated CPU-power source on Linux, and it needs root. The user's
+  // deployment can grant the service user access via a udev rule
+  // (`SUBSYSTEM=="powercap", MODE="0644"`). When that's not available we
+  // fall back to a TDP × usage estimate — rough, but always non-null.
+  const pkg = await readFile("/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj");
+  if (!pkg) {
+    const tdp = estimateTdp(model);
+    return Math.round((overallUsage / 100) * tdp);
+  }
+  // RAPL returns cumulative microjoules; convert via time delta tracked
+  // in `lastEnergySample` to get a watts reading.
+  const now = Date.now();
+  const energy = Number(pkg.trim());
+  if (!Number.isFinite(energy) || !lastEnergySample) {
+    lastEnergySample = { energy, at: now };
+    return null;
+  }
+  const dE = energy - lastEnergySample.energy; // µJ
+  const dT = (now - lastEnergySample.at) / 1000; // s
+  lastEnergySample = { energy, at: now };
+  if (dT <= 0) return null;
+  // Guard against the 32-bit µJ counter rolling over.
+  if (dE < 0) return null;
+  return Math.round(dE / 1e6 / dT);
+}
+
+let lastEnergySample: { energy: number; at: number } | null = null;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -249,15 +339,16 @@ export async function collectCpu(): Promise<CpuInfo> {
     return lastGood;
   }
 
-  // Temperature: Linux exposes it via /sys/class/thermal or /sys/class/hwmon.
-  // macOS would need `sudo powermetrics` (privileged, heavy) or a third-party
-  // SMC reader — neither is a reasonable default. We propagate `null` so the
-  // UI can show "—" instead of a misleading 0°C.
+  // Temperature: Linux reads it via `sensors` (k10temp/coretext Tctl).
+  // macOS would need `sudo powermetrics` (privileged, heavy) or a
+  // third-party SMC reader — neither is a reasonable default. We propagate
+  // `null` so the UI can show "—" instead of a misleading 0°C.
   //
-  // Power: no cross-platform non-privileged source exists. RAPL on Linux
-  // would work, but it's out of scope for now. The nvidia-smi path already
-  // covers GPU power; CPU power is `null` until a platform-specific reader
-  // is wired in.
+  // Power: Linux tries RAPL first (real µJ delta → watts) and falls back
+  // to a TDP × usage estimate. macOS still returns `null`. The nvidia-smi
+  // path covers GPU power; CPU power on macOS is out of scope for now.
+  const power = isLinux ? await readPower(overallUsage, id.model) : null;
+
   const next: CpuInfo = {
     brand: id.brand,
     model: id.model,
@@ -268,7 +359,7 @@ export async function collectCpu(): Promise<CpuInfo> {
     overall: overallUsage,
     cores,
     temperature,
-    power: null,
+    power,
   };
 
   if (sample) {

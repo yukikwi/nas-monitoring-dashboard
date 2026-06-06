@@ -65,6 +65,39 @@ argv array natively and passes each element as a single argument. Use
 `$` only for hardcoded shell pipelines where every token is shell-safe
 (e.g. `$`df -k``). For variable argv, use `Bun.spawn`.
 
+### `Bun.file().exists()` poisons `/proc` file reads
+
+On Linux, `Bun.file(path).exists()` calls `stat()` first, and `/proc`
+files have a `stat()` size of 0. That cached size is then used by the
+subsequent `text()` / `arrayBuffer()` call, which returns an empty
+string/buffer. The `exists()` call also reports `true` for `/proc`
+files, so the bug is silent — you get a truthy result with empty
+content, not an error.
+
+This breaks every collector that reads `/proc/cpuinfo`, `/proc/stat`,
+`/proc/meminfo`, etc. Symptoms: brand/model/cores show "unknown"/0,
+memory all zeros, CPU `overall` stuck at 0%.
+
+The fix: skip `exists()` and just call `text()`, catching the `ENOENT`
+that fires for genuinely missing files:
+
+```ts
+// WRONG — stat()'s size=0 corrupts the lazy handle
+export async function readFile(path: string): Promise<string | null> {
+  try {
+    const file = Bun.file(path);
+    if (!(await file.exists())) return null;
+    return await file.text();
+  } catch { return null; }
+}
+
+// RIGHT — text() throws ENOENT for missing files, returns real data otherwise
+export async function readFile(path: string): Promise<string | null> {
+  try { return await Bun.file(path).text(); }
+  catch { return null; }
+}
+```
+
 ### `df` mount paths can contain spaces
 
 macOS mounts like `/Volumes/MiniMax Code 3.0.37-arm64` (mounted DMGs,
@@ -99,7 +132,37 @@ The poller depends on `tryRun` returning `null` on failure. If a metric
 suddenly returns all-zeros, set `DEBUG_METRICS=1` and re-run to see the
 underlying errors.
 
-### Never poison the cache with a "no data" payload
+### `hwmon0` is not "the CPU sensor"
+
+`/sys/class/hwmon/hwmon0` is the first enumerated sensor — usually the
+NVMe drive, the GPU, or some other peripheral. On this box `hwmon0` is
+the NVMe composite, which sits around 50°C and produces a constant
+"CPU temperature" reading. To find the actual CPU temperature:
+
+1. Run `sensors -j` (lm-sensors) and prefer adapters whose name
+   contains `k10temp` (AMD) or `coretemp` (Intel). Read the
+   `Tctl` / `Tdie` / `Package id 0` feature's `temp1_input`.
+2. Fall back to `/sys/class/thermal/thermal_zone0/temp` — but only as
+   a last resort; some distros don't expose thermal zones at all.
+
+Hardcoding `hwmon0` to mean "CPU" silently ships the wrong number.
+
+### RAPL CPU power needs root
+
+`/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj` is the only
+non-estimated CPU-power source on Linux, and it's mode 400 owned by
+root — a normal service user gets `Permission denied` (the file
+appears to be there, but the kernel blocks the read). Two paths:
+
+- **Production**: grant access with a udev rule:
+  `SUBSYSTEM=="powercap", MODE="0644"`. The collector should still
+  tolerate `null` and fall back gracefully if the file is unreadable.
+- **Dev / no-root**: estimate from `TDP × overall_usage` using a model
+  name lookup. The estimate is rough (ignores boost/PBO, treats idle
+  as 0W) but always non-null, which is what the UI wants.
+
+AMD RAPL counters wrap at 32 bits and roll over — guard against
+negative deltas.
 
 When a collector can't read a value (subprocess killed, timeout, malformed
 output), it must return the **last good value**, not a zero/fallback.

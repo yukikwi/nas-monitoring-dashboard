@@ -64,12 +64,17 @@ export async function tryRun(
   }
 }
 
-/** Read the contents of a file, or return null if it doesn't exist / errors. */
+/**
+ * Read the contents of a file, or return null if it doesn't exist / errors.
+ *
+ * Don't call `file.exists()` first: on `/proc` files `stat()` reports size 0,
+ * which poisons Bun's lazy file handle so the subsequent `text()` call
+ * returns an empty string. `text()` already throws `ENOENT` for missing
+ * files, which the `try`/`catch` covers.
+ */
 export async function readFile(path: string): Promise<string | null> {
   try {
-    const file = Bun.file(path);
-    if (!(await file.exists())) return null;
-    return await file.text();
+    return await Bun.file(path).text();
   } catch {
     return null;
   }
