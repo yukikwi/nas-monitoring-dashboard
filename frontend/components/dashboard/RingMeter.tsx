@@ -26,9 +26,15 @@ export function RingMeter({
 }: RingMeterProps) {
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
-  const clamped = Math.max(0, Math.min(100, value));
+  // Guard against `NaN` (e.g. when a parent computes `used/total` and
+  // `total` is 0 — happens for the empty pre-SSE snapshot, where every
+  // numeric field is 0). Without this, Framer Motion animates
+  // `strokeDashoffset` to `NaN` and logs a noisy browser warning.
+  const clamped = Number.isFinite(value)
+    ? Math.max(0, Math.min(100, value))
+    : 0;
   const offset = circumference - (clamped / 100) * circumference;
-  const gradientId = `ring-gradient-${Math.round(value)}-${size}`;
+  const gradientId = `ring-gradient-${Math.round(clamped)}-${size}`;
 
   return (
     <div

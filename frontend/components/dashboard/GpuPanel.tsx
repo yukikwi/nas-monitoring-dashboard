@@ -20,8 +20,11 @@ interface GpuPanelProps {
 }
 
 export function GpuPanel({ gpu }: GpuPanelProps) {
-  const vramPercent = (gpu.vramUsed / gpu.vramTotal) * 100;
-  const powerPercent = (gpu.power / gpu.powerLimit) * 100;
+  // Guard against `0/0` from the pre-SSE empty snapshot. The meters
+  // also have a NaN guard, but treating 0-total as 0% here keeps the
+  // rendered values finite end-to-end.
+  const vramPercent = gpu.vramTotal > 0 ? (gpu.vramUsed / gpu.vramTotal) * 100 : 0;
+  const powerPercent = gpu.powerLimit > 0 ? (gpu.power / gpu.powerLimit) * 100 : 0;
 
   return (
     <GlassCard className="h-full">

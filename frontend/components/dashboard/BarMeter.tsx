@@ -16,7 +16,11 @@ export function BarMeter({
   height = 8,
   showShimmer = true,
 }: BarMeterProps) {
-  const clamped = Math.max(0, Math.min(100, value));
+  // Guard against `NaN` from `0/0` divisions in panels (see RingMeter
+  // for the same pattern). Treat non-finite values as 0%.
+  const clamped = Number.isFinite(value)
+    ? Math.max(0, Math.min(100, value))
+    : 0;
   const gradient = colorForUsage(clamped);
 
   return (

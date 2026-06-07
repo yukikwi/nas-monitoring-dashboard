@@ -5,24 +5,23 @@ import { BackgroundOrbs } from "@/components/dashboard/BackgroundOrbs";
 import { Header } from "@/components/dashboard/Header";
 import { CpuPanel } from "@/components/dashboard/CpuPanel";
 import { GpuPanel } from "@/components/dashboard/GpuPanel";
+import { LoadingOverlay } from "@/components/dashboard/LoadingOverlay";
 import { MemoryPanel } from "@/components/dashboard/MemoryPanel";
 import { StoragePanel } from "@/components/dashboard/StoragePanel";
 import { DockerPanel } from "@/components/dashboard/DockerPanel";
-import type { DashboardSnapshot } from "@/types";
 import { useRealtimeSnapshot, type LiveStatus } from "@/lib/useRealtimeSnapshot";
 import { hasGpuData } from "@/lib/gpu";
 
-interface DashboardClientProps {
-  /**
-   * Initial snapshot to render with. The `useRealtimeSnapshot` hook
-   * progressively replaces each field as the corresponding SSE stream
-   * delivers its first event, so the dashboard never shows an empty state.
-   */
-  initial: DashboardSnapshot;
-}
-
-export function DashboardClient({ initial }: DashboardClientProps) {
-  const { snapshot, status } = useRealtimeSnapshot(initial);
+/**
+ * Top-level dashboard container. Subscribes to the six backend SSE
+ * topics via `useRealtimeSnapshot` and lays out the panels. While the
+ * first batch of events is in flight, a 3D loading overlay sits on
+ * top; once `ready` flips to `true` it fades out in sync with the
+ * dashboard fading in, giving a smooth handoff from "loading" to
+ * "live data".
+ */
+export function DashboardClient() {
+  const { snapshot, status, ready } = useRealtimeSnapshot();
   const showGpu = hasGpuData(snapshot.gpu);
   const memoryPercent =
     snapshot.memory.ramTotal > 0
@@ -32,7 +31,17 @@ export function DashboardClient({ initial }: DashboardClientProps) {
   return (
     <>
       <BackgroundOrbs />
-      <div className="relative mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8">
+
+      {/* Dashboard content. We always render it so the panels mount and
+          Framer Motion's stagger runs once; while `!ready` we just keep
+          it at opacity 0 so the loading overlay is the only thing the
+          user sees. When `ready` flips, both the overlay and the
+          dashboard cross-fade for 0.8s. */}
+      <motion.div
+        animate={{ opacity: ready ? 1 : 0 }}
+        transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+        className="relative mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8"
+      >
         <div className="mb-6">
           <Header
             hostname={snapshot.hostname}
@@ -98,7 +107,9 @@ export function DashboardClient({ initial }: DashboardClientProps) {
         <footer className="mt-6 text-center text-[10px] uppercase tracking-[0.2em] text-white/30">
           Liquid glass · live data · {new Date(snapshot.timestamp).getFullYear()}
         </footer>
-      </div>
+      </motion.div>
+
+      <LoadingOverlay visible={!ready} />
     </>
   );
 }

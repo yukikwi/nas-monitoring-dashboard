@@ -14,10 +14,14 @@ interface MemoryPanelProps {
 }
 
 export function MemoryPanel({ memory }: MemoryPanelProps) {
-  const ramPercent = (memory.ramUsed / memory.ramTotal) * 100;
+  // Guard against `0/0` from the pre-SSE empty snapshot (see GpuPanel
+  // for the same pattern). Without this, the ring meter renders "NaN%"
+  // and Framer Motion logs a noisy "value not animatable" warning.
+  const ramPercent =
+    memory.ramTotal > 0 ? (memory.ramUsed / memory.ramTotal) * 100 : 0;
   const swapPercent =
     memory.swapTotal > 0 ? (memory.swapUsed / memory.swapTotal) * 100 : 0;
-  const available = memory.ramTotal - memory.ramUsed;
+  const available = Math.max(0, memory.ramTotal - memory.ramUsed);
 
   return (
     <GlassCard className="h-full">
@@ -74,7 +78,11 @@ export function MemoryPanel({ memory }: MemoryPanelProps) {
                 className="absolute inset-y-0 left-0 rounded-full bg-white/30 mix-blend-overlay"
                 initial={{ width: 0 }}
                 animate={{
-                  width: `${(memory.ramCached / memory.ramTotal) * 100}%`,
+                  width: `${
+                    memory.ramTotal > 0
+                      ? (memory.ramCached / memory.ramTotal) * 100
+                      : 0
+                  }%`,
                 }}
                 transition={{ duration: 1.0, delay: 0.2 }}
               />
