@@ -51,8 +51,23 @@ const VIRTUAL_FS = new Set([
 ]);
 
 // Mount-point prefixes that are never physical disks.
+//
+// We list each macOS APFS system volume explicitly rather than blanket-
+// excluding `/System/Volumes/`, because `/System/Volumes/Data` is the
+// writable user data volume — the only place user files actually live
+// on a modern Mac. Excluding it leaves the dashboard showing just the
+// read-only sealed root `/` (~12 GB), which under-reports real usage
+// by an order of magnitude.
 const VIRTUAL_MOUNT_PREFIXES = [
-  "/System/Volumes/", // macOS APFS system volumes
+  // macOS APFS system volumes (NOT user data)
+  "/System/Volumes/VM", // virtual machine data
+  "/System/Volumes/Preboot", // preboot files
+  "/System/Volumes/Update", // software update staging
+  "/System/Volumes/xarts", // Apple Root CA store
+  "/System/Volumes/iSCPreboot", // iSCSI preboot
+  "/System/Volumes/Hardware", // hardware test partition
+  "/System/Volumes/Recovery", // macOS recovery
+  // Other platform virtual mounts
   "/private/var/folders",
   "/snap/", // snap package mounts
   "/sys/",
@@ -262,7 +277,7 @@ export async function collectStorage(): Promise<StorageInfo> {
 
   // Filter to physical disks only — drop virtual filesystems, network
   // mounts, and loopback/ramdisk device paths.
-  const mounts = df.filter((d) => {
+  let mounts = df.filter((d) => {
     if (VIRTUAL_FS.has(d.filesystem.toLowerCase())) return false;
     if (NETWORK_FS_PATTERN.test(d.filesystem)) return false;
     if (isCifsFs(d.filesystem)) return false;
@@ -270,6 +285,17 @@ export async function collectStorage(): Promise<StorageInfo> {
     if (VIRTUAL_DEVICE_PREFIXES.some((p) => d.device.startsWith(p))) return false;
     return d.totalKb > 0;
   });
+
+  // On modern macOS, the read-only sealed system volume `/` and the
+  // writable user data volume `/System/Volumes/Data` share an APFS
+  // container, and `df` reports the same container total for both.
+  // Summing them would double-count. When the data volume is present,
+  // drop the sealed root — the data volume's `used` is the number
+  // users actually care about (it matches what macOS Settings →
+  // General → Storage reports).
+  if (isMac && mounts.some((m) => m.mount === "/System/Volumes/Data")) {
+    mounts = mounts.filter((m) => m.mount !== "/");
+  }
 
   // Build per-disk records. For devfs/virtual mounts with no real device,
   // pick a stable id from the mount path.
